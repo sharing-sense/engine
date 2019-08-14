@@ -4,7 +4,7 @@ ENV DEPOT_TOOLS_PATH $HOME/depot_tools
 ENV ENGINE_PATH $HOME/engine
 
 RUN apt-get update
-RUN apt-get install -y git wget curl unzip python lsb-release sudo
+RUN apt-get install -y git wget curl unzip python lsb-release sudo apt-transport-https
 
 RUN git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git $DEPOT_TOOLS_PATH
 ENV PATH $PATH:$DEPOT_TOOLS_PATH
@@ -17,9 +17,15 @@ RUN gclient sync
 WORKDIR $ENGINE_PATH/src
 RUN ./build/install-build-deps.sh --no-prompt
 RUN ./build/install-build-deps-android.sh --no-prompt
+RUN ./flutter/build/install-build-deps-linux-desktop.sh
 
-WORKDIR $HOME/dart
-RUN wget https://storage.googleapis.com/dart-archive/channels/dev/release/2.1.0-dev.7.1/sdk/dartsdk-linux-x64-release.zip
-RUN unzip dartsdk-linux-x64-release.zip
-ENV PATH $PATH:$HOME/dart/dart-sdk/bin
+ # Add repo for gcloud sdk and install it
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+    tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
 
+ RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+    apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+
+ RUN apt-get update && apt-get install -y google-cloud-sdk && \
+    gcloud config set core/disable_usage_reporting true && \
+    gcloud config set component_manager/disable_update_check true

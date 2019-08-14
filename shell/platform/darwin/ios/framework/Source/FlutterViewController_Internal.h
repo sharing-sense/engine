@@ -15,9 +15,7 @@
 @interface FlutterViewController ()
 
 - (fml::WeakPtr<FlutterViewController>)getWeakPtr;
-- (shell::FlutterPlatformViewsController*)platformViewsController;
-
-@property(readonly) fml::scoped_nsobject<FlutterEngine> engine;
+- (flutter::FlutterPlatformViewsController*)platformViewsController;
 
 @end
 

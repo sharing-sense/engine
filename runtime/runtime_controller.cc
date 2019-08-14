@@ -12,78 +12,100 @@
 #include "flutter/runtime/runtime_delegate.h"
 #include "third_party/tonic/dart_message_handler.h"
 
-namespace blink {
+namespace flutter {
 
 RuntimeController::RuntimeController(
     RuntimeDelegate& p_client,
     DartVM* p_vm,
-    fml::RefPtr<DartSnapshot> p_isolate_snapshot,
-    fml::RefPtr<DartSnapshot> p_shared_snapshot,
+    fml::RefPtr<const DartSnapshot> p_isolate_snapshot,
+    fml::RefPtr<const DartSnapshot> p_shared_snapshot,
     TaskRunners p_task_runners,
-    fml::WeakPtr<SnapshotDelegate> p_snapshot_delegate,
-    fml::WeakPtr<GrContext> p_resource_context,
-    fml::RefPtr<flow::SkiaUnrefQueue> p_unref_queue,
+    fml::WeakPtr<IOManager> p_io_manager,
+    fml::WeakPtr<ImageDecoder> p_image_decoder,
     std::string p_advisory_script_uri,
-    std::string p_advisory_script_entrypoint)
+    std::string p_advisory_script_entrypoint,
+    std::function<void(int64_t)> p_idle_notification_callback,
+    fml::closure p_isolate_create_callback,
+    fml::closure p_isolate_shutdown_callback)
     : RuntimeController(p_client,
                         p_vm,
                         std::move(p_isolate_snapshot),
                         std::move(p_shared_snapshot),
                         std::move(p_task_runners),
-                        std::move(p_snapshot_delegate),
-                        std::move(p_resource_context),
-                        std::move(p_unref_queue),
+                        std::move(p_io_manager),
+                        std::move(p_image_decoder),
                         std::move(p_advisory_script_uri),
                         std::move(p_advisory_script_entrypoint),
-                        WindowData{/* default window data */}) {}
+                        p_idle_notification_callback,
+                        WindowData{/* default window data */},
+                        p_isolate_create_callback,
+                        p_isolate_shutdown_callback) {}
 
 RuntimeController::RuntimeController(
     RuntimeDelegate& p_client,
     DartVM* p_vm,
-    fml::RefPtr<DartSnapshot> p_isolate_snapshot,
-    fml::RefPtr<DartSnapshot> p_shared_snapshot,
+    fml::RefPtr<const DartSnapshot> p_isolate_snapshot,
+    fml::RefPtr<const DartSnapshot> p_shared_snapshot,
     TaskRunners p_task_runners,
-    fml::WeakPtr<SnapshotDelegate> p_snapshot_delegate,
-    fml::WeakPtr<GrContext> p_resource_context,
-    fml::RefPtr<flow::SkiaUnrefQueue> p_unref_queue,
+    fml::WeakPtr<IOManager> p_io_manager,
+    fml::WeakPtr<ImageDecoder> p_image_decoder,
     std::string p_advisory_script_uri,
     std::string p_advisory_script_entrypoint,
-    WindowData p_window_data)
+    std::function<void(int64_t)> idle_notification_callback,
+    WindowData p_window_data,
+    fml::closure p_isolate_create_callback,
+    fml::closure p_isolate_shutdown_callback)
     : client_(p_client),
       vm_(p_vm),
       isolate_snapshot_(std::move(p_isolate_snapshot)),
       shared_snapshot_(std::move(p_shared_snapshot)),
       task_runners_(p_task_runners),
-      snapshot_delegate_(p_snapshot_delegate),
-      resource_context_(p_resource_context),
-      unref_queue_(p_unref_queue),
+      io_manager_(p_io_manager),
+      image_decoder_(p_image_decoder),
       advisory_script_uri_(p_advisory_script_uri),
       advisory_script_entrypoint_(p_advisory_script_entrypoint),
+      idle_notification_callback_(idle_notification_callback),
       window_data_(std::move(p_window_data)),
-      root_isolate_(
-          DartIsolate::CreateRootIsolate(vm_,
-                                         isolate_snapshot_,
-                                         shared_snapshot_,
-                                         task_runners_,
-                                         std::make_unique<Window>(this),
-                                         snapshot_delegate_,
-                                         resource_context_,
-                                         unref_queue_,
-                                         p_advisory_script_uri,
-                                         p_advisory_script_entrypoint)) {
-  std::shared_ptr<DartIsolate> root_isolate = root_isolate_.lock();
-  root_isolate->SetReturnCodeCallback([this](uint32_t code) {
+      isolate_create_callback_(p_isolate_create_callback),
+      isolate_shutdown_callback_(p_isolate_shutdown_callback) {
+  // Create the root isolate as soon as the runtime controller is initialized.
+  // It will be run at a later point when the engine provides a run
+  // configuration and then runs the isolate.
+  auto strong_root_isolate =
+      DartIsolate::CreateRootIsolate(vm_->GetVMData()->GetSettings(),  //
+                                     isolate_snapshot_,                //
+                                     shared_snapshot_,                 //
+                                     task_runners_,                    //
+                                     std::make_unique<Window>(this),   //
+                                     io_manager_,                      //
+                                     image_decoder_,                   //
+                                     p_advisory_script_uri,            //
+                                     p_advisory_script_entrypoint,     //
+                                     nullptr,                          //
+                                     isolate_create_callback_,         //
+                                     isolate_shutdown_callback_        //
+                                     )
+          .lock();
+
+  FML_CHECK(strong_root_isolate) << "Could not create root isolate.";
+
+  // The root isolate ivar is weak.
+  root_isolate_ = strong_root_isolate;
+
+  strong_root_isolate->SetReturnCodeCallback([this](uint32_t code) {
     root_isolate_return_code_ = {true, code};
   });
+
   if (auto* window = GetWindowIfAvailable()) {
-    tonic::DartState::Scope scope(root_isolate);
+    tonic::DartState::Scope scope(strong_root_isolate);
     window->DidCreateIsolate();
     if (!FlushRuntimeStateToIsolate()) {
-      FML_DLOG(ERROR) << "Could not setup intial isolate state.";
+      FML_DLOG(ERROR) << "Could not setup initial isolate state.";
     }
   } else {
     FML_DCHECK(false) << "RuntimeController created without window binding.";
   }
+
   FML_DCHECK(Dart_CurrentIsolate() == nullptr);
 }
 
@@ -115,12 +137,14 @@ std::unique_ptr<RuntimeController> RuntimeController::Clone() const {
       isolate_snapshot_,            //
       shared_snapshot_,             //
       task_runners_,                //
-      snapshot_delegate_,           //
-      resource_context_,            //
-      unref_queue_,                 //
+      io_manager_,                  //
+      image_decoder_,               //
       advisory_script_uri_,         //
       advisory_script_entrypoint_,  //
-      window_data_                  //
+      idle_notification_callback_,  //
+      window_data_,                 //
+      isolate_create_callback_,     //
+      isolate_shutdown_callback_    //
       ));
 }
 
@@ -129,7 +153,8 @@ bool RuntimeController::FlushRuntimeStateToIsolate() {
          SetLocales(window_data_.locale_data) &&
          SetSemanticsEnabled(window_data_.semantics_enabled) &&
          SetAccessibilityFeatures(window_data_.accessibility_feature_flags_) &&
-         SetUserSettingsData(window_data_.user_settings_data);
+         SetUserSettingsData(window_data_.user_settings_data) &&
+         SetLifecycleState(window_data_.lifecycle_state);
 }
 
 bool RuntimeController::SetViewportMetrics(const ViewportMetrics& metrics) {
@@ -150,7 +175,8 @@ bool RuntimeController::SetLocales(
     window->UpdateLocales(locale_data);
     return true;
   }
-  return true;
+
+  return false;
 }
 
 bool RuntimeController::SetUserSettingsData(const std::string& data) {
@@ -158,6 +184,17 @@ bool RuntimeController::SetUserSettingsData(const std::string& data) {
 
   if (auto* window = GetWindowIfAvailable()) {
     window->UpdateUserSettingsData(window_data_.user_settings_data);
+    return true;
+  }
+
+  return false;
+}
+
+bool RuntimeController::SetLifecycleState(const std::string& data) {
+  window_data_.lifecycle_state = data;
+
+  if (auto* window = GetWindowIfAvailable()) {
+    window->UpdateLifecycleState(window_data_.lifecycle_state);
     return true;
   }
 
@@ -194,6 +231,14 @@ bool RuntimeController::BeginFrame(fml::TimePoint frame_time) {
   return false;
 }
 
+bool RuntimeController::ReportTimings(std::vector<int64_t> timings) {
+  if (auto* window = GetWindowIfAvailable()) {
+    window->ReportTimings(std::move(timings));
+    return true;
+  }
+  return false;
+}
+
 bool RuntimeController::NotifyIdle(int64_t deadline) {
   std::shared_ptr<DartIsolate> root_isolate = root_isolate_.lock();
   if (!root_isolate) {
@@ -201,7 +246,14 @@ bool RuntimeController::NotifyIdle(int64_t deadline) {
   }
 
   tonic::DartState::Scope scope(root_isolate);
+
   Dart_NotifyIdle(deadline);
+
+  // Idle notifications being in isolate scope are part of the contract.
+  if (idle_notification_callback_) {
+    TRACE_EVENT0("flutter", "EmbedderIdleNotification");
+    idle_notification_callback_(deadline);
+  }
   return true;
 }
 
@@ -276,6 +328,10 @@ void RuntimeController::UpdateIsolateDescription(const std::string isolate_name,
   client_.UpdateIsolateDescription(isolate_name, isolate_port);
 }
 
+void RuntimeController::SetNeedsReportTimings(bool value) {
+  client_.SetNeedsReportTimings(value);
+}
+
 Dart_Port RuntimeController::GetMainPort() {
   std::shared_ptr<DartIsolate> root_isolate = root_isolate_.lock();
   return root_isolate ? root_isolate->main_port() : ILLEGAL_PORT;
@@ -325,4 +381,4 @@ RuntimeController::WindowData::WindowData(const WindowData& other) = default;
 
 RuntimeController::WindowData::~WindowData() = default;
 
-}  // namespace blink
+}  // namespace flutter

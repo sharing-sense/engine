@@ -12,8 +12,10 @@
 #include "flutter/fml/time/time_point.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
-namespace flow {
+namespace flutter {
 
+// DEPRECATED
+// The frame per second FPS could be different than 60 (e.g., 120).
 static const double kOneFrameMS = 1e3 / 60.0;
 
 class Stopwatch {
@@ -27,6 +29,8 @@ class Stopwatch {
   fml::TimeDelta CurrentLap() const { return fml::TimePoint::Now() - start_; }
 
   fml::TimeDelta MaxDelta() const;
+
+  fml::TimeDelta AverageDelta() const;
 
   void InitVisualizeSurface(const SkRect& rect) const;
 
@@ -90,6 +94,6 @@ class CounterValues {
   FML_DISALLOW_COPY_AND_ASSIGN(CounterValues);
 };
 
-}  // namespace flow
+}  // namespace flutter
 
 #endif  // FLUTTER_FLOW_INSTRUMENTATION_H_

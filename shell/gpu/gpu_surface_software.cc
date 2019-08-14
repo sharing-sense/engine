@@ -7,24 +7,19 @@
 #include <memory>
 #include "flutter/fml/logging.h"
 
-namespace shell {
-
-flow::ExternalViewEmbedder*
-GPUSurfaceSoftwareDelegate::GetExternalViewEmbedder() {
-  return nullptr;
-}
+namespace flutter {
 
 GPUSurfaceSoftware::GPUSurfaceSoftware(GPUSurfaceSoftwareDelegate* delegate)
     : delegate_(delegate), weak_factory_(this) {}
 
 GPUSurfaceSoftware::~GPUSurfaceSoftware() = default;
 
-// |shell::Surface|
+// |Surface|
 bool GPUSurfaceSoftware::IsValid() {
   return delegate_ != nullptr;
 }
 
-// |shell::Surface|
+// |Surface|
 std::unique_ptr<SurfaceFrame> GPUSurfaceSoftware::AcquireFrame(
     const SkISize& logical_size) {
   if (!IsValid()) {
@@ -65,7 +60,7 @@ std::unique_ptr<SurfaceFrame> GPUSurfaceSoftware::AcquireFrame(
   return std::make_unique<SurfaceFrame>(backing_store, on_submit);
 }
 
-// |shell::Surface|
+// |Surface|
 SkMatrix GPUSurfaceSoftware::GetRootTransformation() const {
   // This backend does not currently support root surface transformations. Just
   // return identity.
@@ -74,15 +69,15 @@ SkMatrix GPUSurfaceSoftware::GetRootTransformation() const {
   return matrix;
 }
 
-// |shell::Surface|
+// |Surface|
 GrContext* GPUSurfaceSoftware::GetContext() {
   // There is no GrContext associated with a software surface.
   return nullptr;
 }
 
-// |shell::Surface|
-flow::ExternalViewEmbedder* GPUSurfaceSoftware::GetExternalViewEmbedder() {
+// |Surface|
+flutter::ExternalViewEmbedder* GPUSurfaceSoftware::GetExternalViewEmbedder() {
   return delegate_->GetExternalViewEmbedder();
 }
 
-}  // namespace shell
+}  // namespace flutter

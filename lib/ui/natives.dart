@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(dnfield): remove unused_element ignores when https://github.com/dart-lang/sdk/issues/35164 is resolved.
+
 part of dart.ui;
 
 // Corelib 'print' implementation.
@@ -13,6 +15,11 @@ class _Logger {
   static void _printString(String s) native 'Logger_PrintString';
 }
 
+// If we actually run on big endian machines, we'll need to do something smarter
+// here. We don't use [Endian.Host] because it's not a compile-time
+// constant and can't propagate into the set/get calls.
+const Endian _kFakeHostEndian = Endian.little;
+
 // A service protocol extension to schedule a frame to be rendered into the
 // window.
 Future<developer.ServiceExtensionResponse> _scheduleFrame(
@@ -22,13 +29,13 @@ Future<developer.ServiceExtensionResponse> _scheduleFrame(
   // Schedule the frame.
   window.scheduleFrame();
   // Always succeed.
-  return new developer.ServiceExtensionResponse.result(json.encode(<String, String>{
+  return developer.ServiceExtensionResponse.result(json.encode(<String, String>{
     'type': 'Success',
   }));
 }
 
 @pragma('vm:entry-point')
-void _setupHooks() {
+void _setupHooks() {  // ignore: unused_element
   assert(() {
     // In debug mode, register the schedule frame extension.
     developer.registerExtension('ext.ui.window.scheduleFrame', _scheduleFrame);
@@ -38,11 +45,14 @@ void _setupHooks() {
 
 /// Returns runtime Dart compilation trace as a UTF-8 encoded memory buffer.
 ///
-/// The buffer contains a list of symbols compiled by the Dart JIT at runtime up to the point
-/// when this function was called. This list can be saved to a text file and passed to tools
-/// such as `flutter build` or Dart `gen_snapshot` in order to precompile this code offline.
+/// The buffer contains a list of symbols compiled by the Dart JIT at runtime up
+/// to the point when this function was called. This list can be saved to a text
+/// file and passed to tools such as `flutter build` or Dart `gen_snapshot` in
+/// order to pre-compile this code offline.
 ///
-/// The list has one symbol per line of the following format: `<namespace>,<class>,<symbol>\n`.
+/// The list has one symbol per line of the following format:
+/// `<namespace>,<class>,<symbol>\n`.
+///
 /// Here are some examples:
 ///
 /// ```
@@ -67,17 +77,9 @@ int _getCallbackHandle(Function closure) native 'GetCallbackHandle';
 Function _getCallbackFromHandle(int handle) native 'GetCallbackFromHandle';
 
 // Required for gen_snapshot to work correctly.
-int _isolateId;
+int _isolateId; // ignore: unused_element
 
 @pragma('vm:entry-point')
-Function _getPrintClosure() => _print;
+Function _getPrintClosure() => _print;  // ignore: unused_element
 @pragma('vm:entry-point')
-Function _getScheduleMicrotaskClosure() => _scheduleMicrotask;
-
-// Though the "main" symbol is not included in any of the libraries imported
-// above, the builtin library will be included manually during VM setup. This
-// symbol is only necessary for precompilation. It is marked as a stanalone
-// entry point into the VM. This prevents the precompiler from tree shaking
-// away "main".
-@pragma('vm:entry-point')
-Function _getMainClosure() => main;
+Function _getScheduleMicrotaskClosure() => _scheduleMicrotask; // ignore: unused_element
